@@ -8,7 +8,7 @@ model = joblib.load("model.pkl")
 
 
 # Application title
-st.title("House Price Prediction System")
+st.title("Updated House Price Prediction System")
 
 
 st.write(
