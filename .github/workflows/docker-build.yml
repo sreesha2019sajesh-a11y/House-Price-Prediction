@@ -1,0 +1,81 @@
+name: Docker Build and Validation
+
+# Run the workflow on push, pull request, or manually
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+
+  build-and-validate:
+
+    runs-on: ubuntu-latest
+
+    env:
+      IMAGE_NAME: house-price-app
+      IMAGE_TAG: ${{ github.sha }}
+      HEALTH_URL: http://localhost:8501/_stcore/health
+
+    steps:
+
+      # Step 1: Download the source code
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Step 2: Prepare the Docker build environment
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Step 3: Build the Docker image
+      - name: Build Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      # Step 4: Check that the image was created
+      - name: Verify Docker Image
+        run: |
+          docker image inspect $IMAGE_NAME:$IMAGE_TAG > /dev/null
+          docker images $IMAGE_NAME
+
+      # Step 5: Test the model inside the image
+      - name: Test ML Model Inside Container
+        run: docker run --rm $IMAGE_NAME:$IMAGE_TAG python test_model.py
+
+      # Step 6: Start the application container
+      - name: Run Application Container
+        run: |
+          docker run -d -p 8501:8501 \
+            --name test-container $IMAGE_NAME:$IMAGE_TAG
+
+      # Step 7: Check that the Streamlit app responds
+      - name: Application Health Check
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fs $HEALTH_URL | grep -q "ok"; then
+              echo "Application is running and healthy."
+              exit 0
+            fi
+            echo "Waiting for the application to start... ($i/30)"
+            sleep 2
+          done
+          echo "Application did not start."
+          docker logs test-container
+          exit 1
+
+      # Step 8: Remove the test container (always runs)
+      - name: Clean Up
+        if: always()
+        run: docker rm -f test-container || true
+
+      # Step 9: Final message
+      - name: Build Validation Completed
+        run: echo "Docker image built and validated successfully!"
